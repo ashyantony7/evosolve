@@ -1,0 +1,5 @@
+# The maximum line length (in characters)
+max_width = 140
+
+# Use Unix-style line endings
+newline_style = "Unix"
