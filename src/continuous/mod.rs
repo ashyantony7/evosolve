@@ -1,3 +1,5 @@
+mod optimize;
+
 mod algorithms {
     pub mod pso;
 }
