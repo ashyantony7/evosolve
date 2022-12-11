@@ -1,4 +1,4 @@
-mod optimize;
+pub mod optimize;
 
 mod algorithms {
     pub mod pso;

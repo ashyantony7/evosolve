@@ -1,5 +1,7 @@
-use crate::continuous::optimize;
+use crate::continuous::optimize::OptimizeContinuous;
+use crate::utils::misc;
 use rand::{distributions::Standard, prelude::Distribution, thread_rng, Rng};
+use std::ops::{Add, Sub};
 
 pub struct Particle<T> {
     pub position: Vec<T>,
@@ -23,15 +25,12 @@ where
 }
 
 pub struct PSO<T> {
+    dimensions: usize,
     max_iterations: usize,
     lower_bound: Vec<T>,
     upper_bound: Vec<T>,
     pub particles: Vec<Particle<T>>,
     fn_objective: fn(&Vec<T>) -> T,
-    equality_constraints: Vec<fn(&Vec<T>) -> T>,
-    inequality_constraints: Vec<fn(&Vec<T>) -> T>,
-    equality_constraint_weights: Vec<T>,
-    inequality_constraint_weights: Vec<T>,
     best_solution: Vec<T>,
     best_value: T,
     pub c1: f64,
@@ -43,19 +42,16 @@ pub struct PSO<T> {
 impl<T> PSO<T> {
     pub fn new(dimensions: usize, max_iterations: usize, number_particles: usize, objective_function: fn(&Vec<T>) -> T) -> PSO<T>
     where
-        T: Copy + Default + Ord + rand::distributions::uniform::SampleUniform,
+        T: Copy + Default + PartialOrd + rand::distributions::uniform::SampleUniform,
         Standard: Distribution<T>,
     {
         PSO {
+            dimensions,
             max_iterations,
             lower_bound: Vec::with_capacity(dimensions),
             upper_bound: Vec::with_capacity(dimensions),
             particles: Vec::with_capacity(number_particles),
             fn_objective: objective_function,
-            equality_constraints: Vec::new(),
-            inequality_constraints: Vec::new(),
-            equality_constraint_weights: Vec::new(),
-            inequality_constraint_weights: Vec::new(),
             best_solution: Vec::with_capacity(dimensions),
             best_value: T::default(),
             c1: 2.0,
@@ -65,51 +61,6 @@ impl<T> PSO<T> {
         }
     }
 
-    fn range_limit(&self, solution: &mut Vec<T>)
-    where
-        T: PartialOrd + Copy,
-    {
-        for i in 0..solution.len() {
-            if solution[i] < self.lower_bound[i] {
-                solution[i] = self.lower_bound[i];
-            } else if solution[i] > self.upper_bound[i] {
-                solution[i] = self.upper_bound[i];
-            }
-        }
-    }
-
-    fn evaluate(&self, solution: Vec<T>) -> (T, bool)
-    where
-        T: Default
-            + PartialOrd
-            + Copy
-            + std::ops::Add<Output = T>
-            + std::ops::Mul<Output = T>
-            + std::ops::Neg
-            + std::ops::SubAssign
-            + std::ops::AddAssign,
-    {
-        let mut objective = (self.fn_objective)(&solution);
-        let mut constraint_success = true;
-
-        for i in 0..self.equality_constraints.len() {
-            let constraint = (self.equality_constraints[i])(&solution) * self.equality_constraint_weights[i];
-            if constraint > T::default() {
-                constraint_success = false;
-                objective += constraint;
-            }
-        }
-
-        for i in 0..self.inequality_constraints.len() {
-            let constraint = (self.inequality_constraints[i])(&solution);
-            if constraint < T::default() {
-                objective -= constraint * self.inequality_constraint_weights[i];
-            }
-        }
-
-        (objective, constraint_success)
-    }
-
     fn init(&mut self)
     where
         T: Copy + PartialOrd + rand::distributions::uniform::SampleUniform,
@@ -117,7 +68,7 @@ impl<T> PSO<T> {
     {
         let unconstrained: bool = self.lower_bound.is_empty() || self.upper_bound.is_empty();
 
-        for _ in 0..self.particles.capacity() {
+        for p in 0..self.particles.capacity() {
             let mut position = Vec::with_capacity(self.lower_bound.len());
             let mut velocity = Vec::with_capacity(self.lower_bound.len());
 
@@ -140,6 +91,11 @@ impl<T> PSO<T> {
             let best_position = position.clone();
             let best_fitness = (self.fn_objective)(&position);
 
+            if p == 0 || best_fitness < self.best_value {
+                self.best_solution = best_position.clone();
+                self.best_value = best_fitness;
+            }
+
             self.particles.push(Particle {
                 position,
                 velocity,
@@ -148,9 +104,52 @@ impl<T> PSO<T> {
             });
         }
     }
+
+    fn main_loop(&mut self)
+    where
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64>,
+        Standard: Distribution<T>,
+        Vec<T>: FromIterator<<T as Add>::Output>,
+        f64: From<<T as Sub>::Output>,
+    {
+        let mut rng = thread_rng();
+        for _ in 0..self.max_iterations {
+            for particle in self.particles.iter_mut() {
+                for i in 0..particle.velocity.len() {
+                    let r1: f64 = rng.gen_range(0_f64..=1_f64);
+                    let r2: f64 = rng.gen_range(0_f64..=1_f64);
+                    let cognitive: f64 = self.c1 * r1 * f64::from(particle.best_position[i] - particle.position[i]);
+                    let social: f64 = self.c2 * r2 * f64::from(self.best_solution[i] - particle.position[i]);
+                    let new_velocity: f64 = self.w * f64::from(particle.velocity[i]) + cognitive + social;
+                    particle.velocity[i] = new_velocity.into();
+                }
+                particle.position = misc::elementwise_addition(&particle.position, &particle.velocity);
+
+                for i in 0..particle.position.len() {
+                    if particle.position[i] < self.lower_bound[i] {
+                        particle.position[i] = self.lower_bound[i];
+                    } else if particle.position[i] > self.upper_bound[i] {
+                        particle.position[i] = self.upper_bound[i];
+                    }
+                }
+
+                let new_fitness = (self.fn_objective)(&particle.position);
+                if new_fitness < particle.best_fitness {
+                    particle.best_fitness = new_fitness;
+                    particle.best_position = particle.position.clone();
+                    if new_fitness < self.best_value {
+                        self.best_value = new_fitness;
+                        self.best_solution = particle.position.clone();
+                    }
+                }
+            }
+
+            self.best_value_history.push(self.best_value);
+        }
+    }
 }
 
-impl<T> optimize::OptimizeContinuous<T> for PSO<T> {
+impl<T> OptimizeContinuous<T> for PSO<T> {
     fn set_bounds(&mut self, lower_bound: Vec<T>, upper_bound: Vec<T>) -> Result<(), String>
     where
         T: PartialOrd,
@@ -158,6 +157,11 @@ impl<T> optimize::OptimizeContinuous<T> for PSO<T> {
         if lower_bound.len() != upper_bound.len() {
             return Err(String::from("Lower and upper bounds must have the same dimensions"));
         }
+
+        if lower_bound.len() != self.dimensions {
+            return Err(String::from("Bound dimensions must match the number of dimensions of the problem"));
+        }
+
         for i in 0..lower_bound.len() {
             if lower_bound[i] > upper_bound[i] {
                 return Err(String::from("Lower bound must be less than upper bound"));
@@ -170,45 +174,16 @@ impl<T> optimize::OptimizeContinuous<T> for PSO<T> {
         Ok(())
     }
 
-    fn set_equality_constraint(&mut self, constraint: fn(&Vec<T>) -> T) {
-        self.equality_constraints.push(constraint);
-    }
-
-    fn set_inequality_constraint(&mut self, constraint: fn(&Vec<T>) -> T) {
-        self.inequality_constraints.push(constraint);
-    }
-
-    fn get_equality_constraint_weights(&self) -> &Vec<T> {
-        &self.equality_constraint_weights
-    }
-
-    fn set_equality_constraint_weights(&mut self, weights: Vec<T>) -> Result<(), String> {
-        if weights.len() != self.equality_constraints.len() {
-            return Err(String::from("Number of weights must equal number of constraints"));
-        }
-        self.equality_constraint_weights = weights;
-        Ok(())
-    }
-
-    fn get_inequality_constraint_weights(&self) -> &Vec<T> {
-        &self.inequality_constraint_weights
-    }
-
-    fn set_inequality_constraint_weights(&mut self, weights: Vec<T>) -> Result<(), String> {
-        if weights.len() != self.equality_constraints.len() {
-            return Err(String::from("Number of weights must equal number of constraints"));
-        }
-        self.inequality_constraint_weights = weights;
-        Ok(())
-    }
-
     fn optimize(&mut self) -> Result<(), String>
     where
-        T: Copy + PartialOrd + rand::distributions::uniform::SampleUniform,
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64> + rand::distributions::uniform::SampleUniform,
         Standard: Distribution<T>,
+        Vec<T>: FromIterator<<T as Add>::Output>,
+        f64: From<<T as Sub>::Output>,
     {
-        // TODO
         self.init();
+
+        self.main_loop();
 
         Ok(())
     }
