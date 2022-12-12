@@ -198,4 +198,8 @@ impl<T> OptimizeContinuous<T> for PSO<T> {
     {
         self.best_value
     }
+
+    fn get_value_history(&self) -> &Vec<T> {
+        self.best_value_history.as_ref()
+    }
 }

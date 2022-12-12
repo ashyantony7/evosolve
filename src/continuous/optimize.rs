@@ -1,3 +1,7 @@
+//! Optimization algorithms for problems in continuous domains.
+//!
+//! The trait handles the common methods for all optimization algorithms in continuous domains.
+//!
 use rand::{distributions::Standard, prelude::Distribution};
 use std::ops::{Add, Sub};
 
@@ -20,4 +24,6 @@ pub trait OptimizeContinuous<T> {
     fn get_value(&self) -> T
     where
         T: Copy;
+
+    fn get_value_history(&self) -> &Vec<T>;
 }

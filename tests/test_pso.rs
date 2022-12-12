@@ -1,5 +1,4 @@
-use evosolve::continuous::optimize::OptimizeContinuous;
-use evosolve::continuous::pso::PSO;
+use evosolve::prelude::*;
 
 #[test]
 fn pso_bounds() {
@@ -22,6 +21,7 @@ fn pso_f64() {
     let sphere = |x: &Vec<f64>| -> f64 { x.iter().map(|x| x.powi(2)).sum() };
 
     // When we run the PSO algorithm
+    let max_iterations = 200;
     let mut pso = PSO::<f64>::new(2, 200, 100, sphere);
     pso.set_bounds(vec![-100.0, -100.0], vec![100.0, 100.0]).unwrap();
     pso.optimize().unwrap();
@@ -29,4 +29,7 @@ fn pso_f64() {
     // Expect the solution to be close to the origin (0, 0)
     assert!(pso.get_value() < 1e-5);
     assert!(pso.get_solution().iter().all(|x| x.abs() < 1e-4));
+
+    // Expect length of value history to be equal to the number of iterations
+    assert_eq!(pso.get_value_history().len(), max_iterations);
 }
