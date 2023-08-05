@@ -1,3 +1,8 @@
+/// Perform elementwise addition on two vectors.
+///
+/// # Arguments
+/// * x - The first vector.
+/// * y - The second vector.
 pub fn elementwise_addition<T>(x: &Vec<T>, y: &Vec<T>) -> Vec<T>
 where
     T: std::ops::Add + Copy,

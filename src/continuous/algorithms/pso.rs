@@ -3,7 +3,7 @@ use crate::utils::misc;
 use rand::{distributions::Standard, prelude::Distribution, thread_rng, Rng};
 use std::ops::{Add, Sub};
 
-pub struct Particle<T> {
+struct Particle<T> {
     pub position: Vec<T>,
     pub velocity: Vec<T>,
     pub best_position: Vec<T>,
@@ -24,12 +24,32 @@ where
     }
 }
 
+/// Particle Swarm Optimization (PSO) algorithm.
+///
+/// # Example
+///
+/// ```
+/// use evosolve::prelude::*;
+///
+/// // Given a function f(x) = x^2 + y^2
+/// let sphere = |x: &Vec<f64>| -> f64 { x.iter().map(|x| x.powi(2)).sum() };
+///
+/// // When we run the PSO algorithm
+/// let max_iterations = 200;
+/// let mut pso = PSO::<f64>::new(2, 200, 100, sphere);
+/// pso.set_bounds(vec![-100.0, -100.0], vec![100.0, 100.0]).unwrap();
+/// pso.optimize().unwrap();
+///
+/// // Expect the solution to be close to the origin (0, 0)
+/// assert!(pso.get_value() < 1e-5);
+/// assert!(pso.get_solution().iter().all(|x| x.abs() < 1e-4));
+///```
 pub struct PSO<T> {
     dimensions: usize,
     max_iterations: usize,
     lower_bound: Vec<T>,
     upper_bound: Vec<T>,
-    pub particles: Vec<Particle<T>>,
+    particles: Vec<Particle<T>>,
     fn_objective: fn(&Vec<T>) -> T,
     best_solution: Vec<T>,
     best_value: T,
@@ -40,6 +60,13 @@ pub struct PSO<T> {
 }
 
 impl<T> PSO<T> {
+    /// Create a new PSO instance.
+    ///
+    /// # Arguments
+    /// * `dimensions` - Number of dimensions of the problem.
+    /// * `max_iterations` - Maximum number of iterations.
+    /// * `number_particles` - Number of particles.
+    /// * `objective_function` - Objective function to minimize.
     pub fn new(dimensions: usize, max_iterations: usize, number_particles: usize, objective_function: fn(&Vec<T>) -> T) -> PSO<T>
     where
         T: Copy + Default + PartialOrd + rand::distributions::uniform::SampleUniform,
@@ -59,6 +86,18 @@ impl<T> PSO<T> {
             w: 0.7,
             best_value_history: Vec::with_capacity(max_iterations),
         }
+    }
+
+    /// Set the parameters of the PSO algorithm.
+    ///
+    /// # Arguments
+    /// * `c1` - Cognitive parameter.
+    /// * `c2` - Social parameter.
+    /// * `w` - Inertia parameter.
+    pub fn set_parameters(&mut self, c1: f64, c2: f64, w: f64) {
+        self.c1 = c1;
+        self.c2 = c2;
+        self.w = w;
     }
 
     fn init(&mut self)
