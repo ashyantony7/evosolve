@@ -18,7 +18,26 @@ pub trait OptimizeContinuous<T> {
     /// Run the optimization algorithm.
     fn optimize(&mut self) -> Result<(), String>
     where
-        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64> + rand::distributions::uniform::SampleUniform,
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64> + rand::distributions::uniform::SampleUniform + Send,
+        Standard: Distribution<T>,
+        Vec<T>: FromIterator<<T as std::ops::Add>::Output>,
+        f64: From<<T as Sub>::Output>;
+
+    /// Run the optimization algorithm parallelized
+    ///
+    /// # Arguments
+    /// * n_threads - The number of threads to use.
+    fn optimize_parallel(&mut self, n_threads: usize) -> Result<(), String>
+    where
+        T: Add
+            + Sub
+            + Sub<Output = T>
+            + Copy
+            + PartialOrd
+            + std::convert::From<f64>
+            + rand::distributions::uniform::SampleUniform
+            + Send
+            + Sync,
         Standard: Distribution<T>,
         Vec<T>: FromIterator<<T as std::ops::Add>::Output>,
         f64: From<<T as Sub>::Output>;

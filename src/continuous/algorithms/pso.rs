@@ -2,6 +2,7 @@ use crate::continuous::optimize::OptimizeContinuous;
 use crate::utils::misc;
 use rand::{distributions::Standard, prelude::Distribution, thread_rng, Rng};
 use std::ops::{Add, Sub};
+use std::thread;
 
 struct Particle<T> {
     pub position: Vec<T>,
@@ -44,7 +45,10 @@ where
 /// assert!(pso.get_value() < 1e-5);
 /// assert!(pso.get_solution().iter().all(|x| x.abs() < 1e-4));
 ///```
-pub struct PSO<T> {
+pub struct PSO<T>
+where
+    T: Clone,
+{
     dimensions: usize,
     max_iterations: usize,
     lower_bound: Vec<T>,
@@ -59,7 +63,10 @@ pub struct PSO<T> {
     best_value_history: Vec<T>,
 }
 
-impl<T> PSO<T> {
+impl<T> PSO<T>
+where
+    T: Clone + PartialOrd + 'static,
+{
     /// Create a new PSO instance.
     ///
     /// # Arguments
@@ -100,53 +107,110 @@ impl<T> PSO<T> {
         self.w = w;
     }
 
-    fn init(&mut self)
+    fn split_iter_among_threads(&self, num_threads: usize) -> Vec<usize> {
+        let mut iter_per_thread = vec![self.max_iterations / num_threads; num_threads];
+        let remainder = self.max_iterations % num_threads;
+        for i in 0..remainder {
+            iter_per_thread[i as usize] += 1;
+        }
+        iter_per_thread
+    }
+
+    fn random_init_particles(
+        number_particles: usize,
+        lower_bound: Vec<T>,
+        upper_bound: Vec<T>,
+        fn_objective: fn(&Vec<T>) -> T,
+    ) -> Vec<Particle<T>>
     where
         T: Copy + PartialOrd + rand::distributions::uniform::SampleUniform,
         Standard: Distribution<T>,
     {
-        let unconstrained: bool = self.lower_bound.is_empty() || self.upper_bound.is_empty();
+        let mut particles = Vec::with_capacity(number_particles);
 
-        for p in 0..self.particles.capacity() {
-            let mut position = Vec::with_capacity(self.lower_bound.len());
-            let mut velocity = Vec::with_capacity(self.lower_bound.len());
+        let unconstrained: bool = lower_bound.is_empty() || upper_bound.is_empty();
 
-            for i in 0..self.lower_bound.len() {
+        for _ in 0..particles.capacity() {
+            let mut position = Vec::with_capacity(lower_bound.len());
+            let mut velocity = Vec::with_capacity(lower_bound.len());
+
+            for i in 0..lower_bound.len() {
                 let mut rng = thread_rng();
                 let p_i: T = if unconstrained {
                     rng.gen()
                 } else {
-                    rng.gen_range(self.lower_bound[i]..=self.upper_bound[i])
+                    rng.gen_range(lower_bound[i]..=upper_bound[i])
                 };
                 let v_i: T = if unconstrained {
                     rng.gen()
                 } else {
-                    rng.gen_range(self.lower_bound[i]..=self.upper_bound[i])
+                    rng.gen_range(lower_bound[i]..=upper_bound[i])
                 };
                 position.push(p_i);
                 velocity.push(v_i);
             }
 
-            let best_position = position.clone();
-            let best_fitness = (self.fn_objective)(&position);
+            let best_fitness = (fn_objective)(&position);
 
-            if p == 0 || best_fitness < self.best_value {
-                self.best_solution = best_position.clone();
-                self.best_value = best_fitness;
-            }
-
-            self.particles.push(Particle {
-                position,
+            particles.push(Particle {
+                position: position.clone(),
                 velocity,
-                best_position,
+                best_position: position,
                 best_fitness,
             });
         }
+        particles
+    }
+
+    fn init_best_solution(&mut self) {
+        let mut best_value = self.particles[0].best_fitness.clone();
+        let mut best_solution = self.particles[0].best_position.clone();
+        for particle in self.particles.iter() {
+            if particle.best_fitness < best_value {
+                best_value = particle.best_fitness.clone();
+                best_solution = particle.best_position.clone();
+            }
+        }
+        self.best_value = best_value;
+        self.best_solution = best_solution;
+    }
+
+    fn init(&mut self, thread_iters: Vec<usize>)
+    where
+        T: Copy + PartialOrd + rand::distributions::uniform::SampleUniform + Send,
+        Standard: Distribution<T>,
+    {
+        if thread_iters.len() == 1 {
+            self.particles = PSO::<T>::random_init_particles(
+                self.particles.capacity(),
+                self.lower_bound.clone(),
+                self.upper_bound.clone(),
+                self.fn_objective,
+            );
+            self.init_best_solution();
+            return;
+        }
+
+        let mut handles = Vec::with_capacity(thread_iters.len());
+        for i in 0..thread_iters.len() {
+            let num_iters = thread_iters[i].clone();
+            let lower_bound = self.lower_bound.clone();
+            let upper_bound = self.upper_bound.clone();
+            let fn_objective = self.fn_objective.clone();
+            let handle = thread::spawn(move || PSO::<T>::random_init_particles(num_iters, lower_bound, upper_bound, fn_objective));
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            let result = handle.join().unwrap();
+            self.particles.extend(result);
+        }
+        self.init_best_solution();
     }
 
     fn main_loop(&mut self)
     where
-        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64>,
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + From<f64>,
         Standard: Distribution<T>,
         Vec<T>: FromIterator<<T as Add>::Output>,
         f64: From<<T as Sub>::Output>,
@@ -188,7 +252,10 @@ impl<T> PSO<T> {
     }
 }
 
-impl<T> OptimizeContinuous<T> for PSO<T> {
+impl<T> OptimizeContinuous<T> for PSO<T>
+where
+    T: Clone + 'static,
+{
     fn set_bounds(&mut self, lower_bound: Vec<T>, upper_bound: Vec<T>) -> Result<(), String>
     where
         T: PartialOrd,
@@ -215,12 +282,29 @@ impl<T> OptimizeContinuous<T> for PSO<T> {
 
     fn optimize(&mut self) -> Result<(), String>
     where
-        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + std::convert::From<f64> + rand::distributions::uniform::SampleUniform,
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + From<f64> + rand::distributions::uniform::SampleUniform + Send,
         Standard: Distribution<T>,
         Vec<T>: FromIterator<<T as Add>::Output>,
         f64: From<<T as Sub>::Output>,
     {
-        self.init();
+        let thread_iter = vec![self.max_iterations];
+        self.init(thread_iter);
+
+        self.main_loop();
+
+        Ok(())
+    }
+
+    fn optimize_parallel(&mut self, num_threads: usize) -> Result<(), String>
+    where
+        T: Add + Sub + Sub<Output = T> + Copy + PartialOrd + From<f64> + rand::distributions::uniform::SampleUniform + Send + Sync,
+        Standard: Distribution<T>,
+        Vec<T>: FromIterator<<T as Add>::Output>,
+        f64: From<<T as Sub>::Output>,
+    {
+        let thread_iters = self.split_iter_among_threads(num_threads);
+
+        self.init(thread_iters);
 
         self.main_loop();
 
