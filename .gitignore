@@ -24,3 +24,7 @@ Cargo.lock
 # IDE files
 /.idea
 /.vscode
+
+# MacOS Specific
+.DS_Store
+

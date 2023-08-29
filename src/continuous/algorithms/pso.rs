@@ -4,25 +4,12 @@ use rand::{distributions::Standard, prelude::Distribution, thread_rng, Rng};
 use std::ops::{Add, Sub};
 use std::thread;
 
+#[derive(Clone)]
 struct Particle<T> {
     pub position: Vec<T>,
     pub velocity: Vec<T>,
     pub best_position: Vec<T>,
     pub best_fitness: T,
-}
-
-impl<T> Clone for Particle<T>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Particle {
-            position: self.position.clone(),
-            velocity: self.velocity.clone(),
-            best_position: self.best_position.clone(),
-            best_fitness: self.best_fitness.clone(),
-        }
-    }
 }
 
 /// Particle Swarm Optimization (PSO) algorithm.
